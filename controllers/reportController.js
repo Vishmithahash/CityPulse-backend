@@ -108,4 +108,87 @@ const buildMatchStage = (filters) => {
     return match;
 };
 
-//109 ....
+// @desc    Execute report
+// @route   GET /api/reports/:id/run
+// @access  Private/Admin, Officer
+const runReport = async (req, res) => {
+    try {
+        const report = await Report.findById(req.params.id);
+        if (!report) return res.status(404).json({ message: 'Report not found' });
+        if (!report.isActive) return res.status(400).json({ message: 'Report is inactive' });
+
+        // Check cache
+        if (report.cachedData?.data && report.cachedData.expiresAt > new Date()) {
+            return res.json(report.cachedData.data);
+        }
+
+        const { reportType, filters } = report;
+        const matchStage = buildMatchStage(filters);
+        let results = [];
+
+        switch (reportType) {
+            case 'ISSUE_SUMMARY':
+                results = await Issue.aggregate([
+                    { $match: matchStage },
+                    { $group: { _id: '$status', count: { $sum: 1 } } }
+                ]);
+                break;
+
+            case 'CATEGORY_ANALYSIS':
+                results = await Issue.aggregate([
+                    { $match: matchStage },
+                    { $group: { _id: '$category', count: { $sum: 1 } } },
+                    { $sort: { count: -1 } }
+                ]);
+                break;
+
+            case 'OFFICER_PERFORMANCE':
+                results = await Issue.aggregate([
+                    { $match: { assignedTo: { $exists: true }, ...matchStage } },
+                    {
+                        $group: {
+                            _id: '$assignedTo',
+                            total: { $sum: 1 },
+                            resolved: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } },
+                            avgResolutionTime: { $avg: '$resolutionTime' }
+                        }
+                    },
+                    { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'officer' } },
+                    { $unwind: '$officer' },
+                    { $project: { 'officer.password': 0, 'officer.email': 0 } }
+                ]);
+                break;
+
+            case 'MONTHLY_TRENDS':
+                results = await Issue.aggregate([
+                    { $match: matchStage },
+                    {
+                        $group: {
+                            _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+                            count: { $sum: 1 }
+                        }
+                    },
+                    { $sort: { '_id': 1 } }
+                ]);
+                break;
+
+            default:
+                return res.status(400).json({ message: 'Execution logic not implemented for this report type' });
+        }
+
+        // Update report execution metadata & cache
+        report.lastExecuted = new Date();
+        report.executionCount += 1;
+        report.cachedData = {
+            data: results,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000) // 1 hour TTL
+        };
+        await report.save();
+
+        res.json(results);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+//192...
