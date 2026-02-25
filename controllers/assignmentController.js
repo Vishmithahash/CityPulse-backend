@@ -111,3 +111,50 @@ const getAssignmentById = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+const acceptAssignment = async (req, res) => {
+    try {
+        const assignment = await Assignment.findById(req.params.id);
+
+        if (!assignment) {
+            return res.status(404).json({ message: 'Assignment not found' });
+        }
+
+        // Check if it belongs to the logged-in officer
+        if (assignment.assignedTo.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: 'You are not authorized to accept this assignment' });
+        }
+
+        if (assignment.status !== 'active') {
+            return res.status(400).json({ message: `Cannot accept assignment in '${assignment.status}' status` });
+        }
+
+        assignment.status = 'accepted';
+        assignment.history.push({
+            action: 'accepted',
+            officer: req.user._id,
+            notes: 'Assignment accepted by officer'
+        });
+
+        await assignment.save();
+
+        // Update issue status to in-progress
+        await Issue.findByIdAndUpdate(assignment.issue, { status: 'in-progress' });
+
+        // Notify Admin
+        const admins = await User.find({ role: 'admin' });
+        admins.forEach(async (admin) => {
+            await NotificationService.createNotification(
+                admin._id,
+                'ASSIGNMENT_ACCEPTED',
+                'Assignment Accepted',
+                `Officer has accepted the assignment for issue "${assignment.issue}"`,
+                { assignmentId: assignment._id, issueId: assignment.issue }
+            );
+        });
+
+        res.json(assignment);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
