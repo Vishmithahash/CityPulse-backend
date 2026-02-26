@@ -22,6 +22,14 @@ mongoose.connect(process.env.MONGO_URI)
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 
+app.use('/api/reports', require('./routes/reports'));
+app.use('/api/assignments', require('./routes/assignments'));
+
+
+app.use('/api/issues', require('./routes/issues'));
+app.use('/api/upload', require('./routes/upload'));
+
+
 // Health Check
 app.get('/', (req, res) => {
     res.json({
