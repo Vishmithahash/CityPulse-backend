@@ -30,6 +30,7 @@ app.use('/api/issues', require('./routes/issues'));
 app.use('/api/upload', require('./routes/upload'));
 
 app.use('/api/feedback', require('./routes/feedback'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 
 // Health Check
