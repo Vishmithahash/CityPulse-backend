@@ -1,6 +1,11 @@
 const Assignment = require('../models/Assignment');
 const Issue = require('../models/Issue');
+const NotificationService = require('../services/notificationService');
+const User = require('../models/User');
 
+// @desc    Assign issue to officer
+// @route   POST /api/assignments/:issueId
+// @access  Private/Admin
 const createAssignment = async (req, res) => {
     try {
         const { assignedTo, priority, deadline, notes, estimatedTime } = req.body;
@@ -56,6 +61,9 @@ const createAssignment = async (req, res) => {
     }
 };
 
+// @desc    Get my assignments (Officer)
+// @route   GET /api/assignments/me
+// @access  Private/Officer
 const getMyAssignments = async (req, res) => {
     try {
         const { status, limit = 10, page = 1 } = req.query;
@@ -82,6 +90,9 @@ const getMyAssignments = async (req, res) => {
     }
 };
 
+// @desc    Get officer's assignments (Admin)
+// @route   GET /api/assignments/officer/:id
+// @access  Private/Admin
 const getOfficerAssignments = async (req, res) => {
     try {
         const assignments = await Assignment.find({ assignedTo: req.params.id })
@@ -93,6 +104,9 @@ const getOfficerAssignments = async (req, res) => {
     }
 };
 
+// @desc    Get single assignment details
+// @route   GET /api/assignments/:id
+// @access  Private
 const getAssignmentById = async (req, res) => {
     try {
         const assignment = await Assignment.findById(req.params.id)
@@ -112,6 +126,9 @@ const getAssignmentById = async (req, res) => {
     }
 };
 
+// @desc    Officer accepts assignment
+// @route   PUT /api/assignments/:id/accept
+// @access  Private/Officer
 const acceptAssignment = async (req, res) => {
     try {
         const assignment = await Assignment.findById(req.params.id);
@@ -159,6 +176,9 @@ const acceptAssignment = async (req, res) => {
     }
 };
 
+// @desc    Reassign to new officer
+// @route   PUT /api/assignments/:id/reassign
+// @access  Private/Admin
 const reassignIssue = async (req, res) => {
     try {
         const { newOfficerId, notes } = req.body;
