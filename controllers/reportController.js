@@ -192,3 +192,129 @@ const runReport = async (req, res) => {
 };
 
 //192...
+
+
+// @desc    Admin Dashboard Overview
+// @route   GET /api/reports/dashboard/admin
+// @access  Private/Admin
+const getAdminDashboard = async (req, res) => {
+    try {
+        const totalIssues = await Issue.countDocuments();
+        const statusStats = await Issue.aggregate([
+            { $group: { _id: '$status', count: { $sum: 1 } } }
+        ]);
+
+        const categoryStats = await Issue.aggregate([
+            { $group: { _id: '$category', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+
+        const resTimeStats = await Issue.aggregate([
+            { $match: { status: 'resolved', resolutionTime: { $ne: null } } },
+            { $group: { _id: null, avg: { $avg: '$resolutionTime' } } }
+        ]);
+
+        const monthlyTrends = await Issue.aggregate([
+            {
+                $group: {
+                    _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { '_id': 1 } },
+            { $limit: 6 }
+        ]);
+
+        res.json({
+            totalIssues,
+            statusStats,
+            categoryStats,
+            avgResolutionTime: resTimeStats[0]?.avg || 0,
+            monthlyTrends
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Officer Dashboard
+// @route   GET /api/reports/dashboard/officer/:id
+// @access  Private/Officer, Admin
+const getOfficerDashboard = async (req, res) => {
+    try {
+        const officerId = new mongoose.Types.ObjectId(req.params.id);
+
+        const activeAssignments = await Assignment.countDocuments({ assignedTo: officerId, status: { $in: ['active', 'accepted'] } });
+        const completedAssignments = await Assignment.countDocuments({ assignedTo: officerId, status: 'completed' });
+
+        const issueStats = await Issue.aggregate([
+            { $match: { assignedTo: officerId } },
+            {
+                $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+                    resolvedCount: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } },
+                    avgResTime: { $avg: '$resolutionTime' }
+                }
+            }
+        ]);
+
+        // Feedback stats
+        const Feedback = require('../models/Feedback');
+        const feedbackStats = await Feedback.getOfficerAverageRating(officerId);
+
+        res.json({
+            activeAssignments,
+            completedAssignments,
+            totalAssigned: issueStats[0]?.total || 0,
+            resolutionRate: issueStats[0]?.total ? (issueStats[0]?.resolvedCount / issueStats[0]?.total) * 100 : 0,
+            avgResolutionTime: issueStats[0]?.avgResTime || 0,
+            avgRating: feedbackStats.avgRating || 0,
+            feedbackCount: feedbackStats.count || 0
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Citizen Dashboard
+// @route   GET /api/reports/dashboard/citizen/:id
+// @access  Private/Citizen, Admin
+const getCitizenDashboard = async (req, res) => {
+    try {
+        const citizenId = new mongoose.Types.ObjectId(req.params.id);
+
+        const totalReported = await Issue.countDocuments({ reportedBy: citizenId });
+        const statusStats = await Issue.aggregate([
+            { $match: { reportedBy: citizenId } },
+            { $group: { _id: '$status', count: { $sum: 1 } } }
+        ]);
+
+        // Average resolution time for this citizen's issues
+        const resTimeStats = await Issue.aggregate([
+            { $match: { reportedBy: citizenId, status: 'resolved', resolutionTime: { $ne: null } } },
+            { $group: { _id: null, avg: { $avg: '$resolutionTime' } } }
+        ]);
+
+        res.json({
+            totalIssues: totalReported,
+            statusStats,
+            avgResolutionTime: resTimeStats[0]?.avg || 0
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+module.exports = {
+    createReport,
+    getReports,
+    getReportById,
+    updateReport,
+    deleteReport,
+    toggleReportActive,
+    runReport,
+    getAdminDashboard,
+    getOfficerDashboard,
+    getCitizenDashboard
+};
