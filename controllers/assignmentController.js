@@ -1,6 +1,6 @@
 const Assignment = require('../models/Assignment');
 const Issue = require('../models/Issue');
-const NotificationService = require('../services/notificationService');
+
 const User = require('../models/User');
 
 // @desc    Assign issue to officer
