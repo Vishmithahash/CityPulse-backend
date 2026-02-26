@@ -158,3 +158,143 @@ const acceptAssignment = async (req, res) => {
         res.status(400).json({ message: error.message });
     }
 };
+
+const reassignIssue = async (req, res) => {
+    try {
+        const { newOfficerId, notes } = req.body;
+        const oldAssignment = await Assignment.findById(req.params.id);
+
+        if (!oldAssignment) {
+            return res.status(404).json({ message: 'Assignment not found' });
+        }
+
+        if (['completed', 'cancelled'].includes(oldAssignment.status)) {
+            return res.status(400).json({ message: 'Cannot reassign a finished or cancelled assignment' });
+        }
+
+        // 1. Mark old assignment as reassigned
+        oldAssignment.status = 'reassigned';
+        oldAssignment.history.push({
+            action: 'reassigned',
+            admin: req.user._id,
+            notes: `Reassigned to officer ${newOfficerId}. ${notes || ''}`
+        });
+        await oldAssignment.save();
+
+        // 2. Create new assignment
+        const newAssignment = new Assignment({
+            issue: oldAssignment.issue,
+            assignedTo: newOfficerId,
+            assignedBy: req.user._id,
+            priority: oldAssignment.priority,
+            deadline: oldAssignment.deadline,
+            notes: notes || `Reassigned from previous officer.`,
+            history: [{
+                action: 'assigned',
+                admin: req.user._id,
+                officer: newOfficerId,
+                notes: 'New assignment created via reassignment'
+            }]
+        });
+        await newAssignment.save();
+
+        // 3. Update Issue
+        await Issue.findByIdAndUpdate(oldAssignment.issue, {
+            assignedTo: newOfficerId,
+            status: 'assigned' // Reset status to assigned
+        });
+
+        // 4. Notifications
+        // Notify new officer
+        await NotificationService.createNotification(
+            newOfficerId,
+            'ASSIGNMENT_REASSIGNED',
+            'Issue Reassigned to You',
+            `Issue "${oldAssignment.issue}" has been reassigned to you by an admin.`,
+            { assignmentId: newAssignment._id, issueId: oldAssignment.issue }
+        );
+
+        // Notify old officer
+        await NotificationService.createNotification(
+            oldAssignment.assignedTo,
+            'ASSIGNMENT_REASSIGNED',
+            'Issue Reassigned',
+            `Your assignment for issue "${oldAssignment.issue}" has been reassigned to another officer.`,
+            { assignmentId: oldAssignment._id }
+        );
+
+        res.json({ message: 'Issue successfully reassigned', newAssignment });
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+// @desc    Mark as completed
+// @route   PUT /api/assignments/:id/complete
+// @access  Private/Officer
+const completeAssignment = async (req, res) => {
+    try {
+        const { notes } = req.body;
+        const assignment = await Assignment.findById(req.params.id);
+
+        if (!assignment) {
+            return res.status(404).json({ message: 'Assignment not found' });
+        }
+
+        if (assignment.assignedTo.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: 'Not authorized' });
+        }
+
+        assignment.status = 'completed';
+        assignment.history.push({
+            action: 'completed',
+            officer: req.user._id,
+            notes: notes || 'Task completed'
+        });
+        await assignment.save();
+
+        // Update Issue status to resolved
+        await Issue.findByIdAndUpdate(assignment.issue, { status: 'resolved' });
+
+        res.json(assignment);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+};
+
+// @desc    Cancel assignment
+// @route   DELETE /api/assignments/:id
+// @access  Private/Admin
+const deleteAssignment = async (req, res) => {
+    try {
+        const assignment = await Assignment.findById(req.params.id);
+
+        if (!assignment) {
+            return res.status(404).json({ message: 'Assignment not found' });
+        }
+
+        assignment.status = 'cancelled';
+        await assignment.save();
+
+        // Reset issue status to open and remove assigned officer
+        await Issue.findByIdAndUpdate(assignment.issue, {
+            status: 'open',
+            $unset: { assignedTo: 1 }
+        });
+
+        res.json({ message: 'Assignment cancelled and issue returned to open pool' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+module.exports = {
+    createAssignment,
+    getMyAssignments,
+    getOfficerAssignments,
+    getAssignmentById,
+    acceptAssignment,
+    reassignIssue,
+    completeAssignment,
+    deleteAssignment
+};
