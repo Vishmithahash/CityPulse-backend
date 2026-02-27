@@ -176,23 +176,6 @@ const acceptAssignment = async (req, res) => {
         // Update issue status to in-progress
         await Issue.findByIdAndUpdate(assignment.issue, { status: 'in-progress' });
 
-        // Google Calendar Integration - On Assignment Acceptance
-        try {
-            const assignmentWithDetails = await Assignment.findById(assignment._id)
-                .populate('issue')
-                .populate('assignedTo');
-
-            if (assignmentWithDetails && assignmentWithDetails.issue && assignmentWithDetails.assignedTo) {
-                await CalendarService.createAssignmentEvent(
-                    assignmentWithDetails.assignedTo,
-                    assignmentWithDetails,
-                    assignmentWithDetails.issue
-                );
-            }
-        } catch (calError) {
-            console.error('Google Calendar Error (Acceptance):', calError.message);
-        }
-
         // Notify Admin
         const admins = await User.find({ role: 'admin' });
         admins.forEach(async (admin) => {
