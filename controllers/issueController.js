@@ -1,4 +1,5 @@
 const Issue = require('../models/Issue');
+const AIService = require('../services/aiService');
 const cloudinary = require('cloudinary').v2;
 
 // Cloudinary Config
@@ -13,7 +14,22 @@ cloudinary.config({
 // @access  Private/Citizen
 const createIssue = async (req, res) => {
     try {
-        const { title, description, category, priority, location } = req.body;
+        const { title, description, category, priority, location, useAI } = req.body;
+
+        let aiSuggestions = {};
+        if (useAI === 'true' && description) {
+            const [suggestedCategory, suggestedPriority, suggestedTitle] = await Promise.all([
+                AIService.suggestCategory(description),
+                AIService.suggestPriority(description),
+                AIService.generateTitle(description)
+            ]);
+
+            aiSuggestions = {
+                suggestedCategory,
+                suggestedPriority,
+                suggestedTitle
+            };
+        }
 
         // Handle images upload to Cloudinary
         const files = req.files;
@@ -43,21 +59,58 @@ const createIssue = async (req, res) => {
             }
         }
 
+        const finalTitle = title || aiSuggestions.suggestedTitle || 'Issue Report';
+        const finalCategory = category || aiSuggestions.suggestedCategory || 'road';
+        const finalPriority = priority || aiSuggestions.suggestedPriority || 'medium';
+
         const issue = new Issue({
-            title,
+            title: finalTitle,
             description,
-            category,
-            priority,
+            category: finalCategory,
+            priority: finalPriority,
             location: parsedLocation,
             images: imageUrls,
             reportedBy: req.user._id
         });
 
         const createdIssue = await issue.save();
-        res.status(201).json(createdIssue);
+        res.status(201).json({
+            success: true,
+            issue: createdIssue,
+            aiSuggestions
+        });
     } catch (error) {
         console.error('Create Issue Error:', error);
         res.status(400).json({ message: error.message });
+    }
+};
+
+// @desc    Get AI Suggestions for Issue
+// @route   POST /api/issues/ai-suggest
+// @access  Private
+const getAISuggestions = async (req, res) => {
+    try {
+        const { description } = req.body;
+
+        if (!description || description.length < 10) {
+            return res.status(400).json({ message: 'Description too short' });
+        }
+
+        const [category, priority, title] = await Promise.all([
+            AIService.suggestCategory(description),
+            AIService.suggestPriority(description),
+            AIService.generateTitle(description)
+        ]);
+
+        res.json({
+            category,
+            priority,
+            title,
+            confidence: Math.random() * 0.3 + 0.7 // Mock confidence
+        });
+    } catch (error) {
+        console.error('AI Service Error:', error);
+        res.status(500).json({ error: 'AI service unavailable' });
     }
 };
 
@@ -235,5 +288,6 @@ module.exports = {
     getIssueById,
     updateIssue,
     deleteIssue,
-    getIssuesNearby
+    getIssuesNearby,
+    getAISuggestions
 };
