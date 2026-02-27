@@ -1,6 +1,7 @@
 const Assignment = require('../models/Assignment');
 const Issue = require('../models/Issue');
 const NotificationService = require('../services/notificationService');
+const CalendarService = require('../services/calendarService');
 const User = require('../models/User');
 
 // @desc    Assign issue to officer
@@ -54,6 +55,22 @@ const createAssignment = async (req, res) => {
         issue.status = 'assigned';
         issue.assignedTo = assignedTo;
         await issue.save();
+
+        // 5. Google Calendar Integration - On Assignment Creation
+        try {
+            const officer = await User.findById(assignedTo);
+            if (officer) {
+                console.log('🔄 Creating Google Calendar event for assignment...');
+                const calendarResult = await CalendarService.createAssignmentEvent(officer, assignment, issue);
+                if (calendarResult) {
+                    console.log('✅ Calendar event created successfully');
+                } else {
+                    console.log('⚠️  Calendar event creation failed (check logs above)');
+                }
+            }
+        } catch (calError) {
+            console.error('❌ Google Calendar Error (Creation):', calError.message);
+        }
 
         res.status(201).json(assignment);
     } catch (error) {
@@ -158,6 +175,23 @@ const acceptAssignment = async (req, res) => {
         // Update issue status to in-progress
         await Issue.findByIdAndUpdate(assignment.issue, { status: 'in-progress' });
 
+        // Google Calendar Integration - On Assignment Acceptance
+        try {
+            const assignmentWithDetails = await Assignment.findById(assignment._id)
+                .populate('issue')
+                .populate('assignedTo');
+
+            if (assignmentWithDetails && assignmentWithDetails.issue && assignmentWithDetails.assignedTo) {
+                await CalendarService.createAssignmentEvent(
+                    assignmentWithDetails.assignedTo,
+                    assignmentWithDetails,
+                    assignmentWithDetails.issue
+                );
+            }
+        } catch (calError) {
+            console.error('Google Calendar Error (Acceptance):', calError.message);
+        }
+
         // Notify Admin
         const admins = await User.find({ role: 'admin' });
         admins.forEach(async (admin) => {
@@ -219,10 +253,20 @@ const reassignIssue = async (req, res) => {
         await newAssignment.save();
 
         // 3. Update Issue
-        await Issue.findByIdAndUpdate(oldAssignment.issue, {
+        const issue = await Issue.findByIdAndUpdate(oldAssignment.issue, {
             assignedTo: newOfficerId,
             status: 'assigned' // Reset status to assigned
-        });
+        }, { new: true });
+
+        // Google Calendar Integration - On Reassignment
+        try {
+            const officer = await User.findById(newOfficerId);
+            if (officer && issue) {
+                await CalendarService.createAssignmentEvent(officer, newAssignment, issue);
+            }
+        } catch (calError) {
+            console.error('Google Calendar Error (Reassignment):', calError.message);
+        }
 
         // 4. Notifications
         // Notify new officer
