@@ -74,6 +74,16 @@ const createIssue = async (req, res) => {
         });
 
         const createdIssue = await issue.save();
+
+        // 🚨 NEW: SEND WELCOME EMAIL TO CITIZEN
+        try {
+            console.log(`📨 Attempting to send welcome email to: ${req.user.email}`);
+            const EmailService = require('../services/emailService');
+            await EmailService.sendIssueReportedEmail(createdIssue, req.user);
+        } catch (emailError) {
+            console.error('⚠️ Welcome Email Failed:', emailError.message);
+        }
+
         res.status(201).json({
             success: true,
             issue: createdIssue,
