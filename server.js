@@ -2,10 +2,14 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const socket = require('./socket');
 
 dotenv.config();
 
 const app = express();
+
+// Initialize Socket.io
+const io = socket.init(server);
 
 // Middleware
 app.use(cors());
@@ -16,7 +20,25 @@ mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB Connected - CityPulse'))
     .catch(err => console.error('❌ MongoDB Error:', err));
 
+// Socket Connection Logic
+io.on('connection', (socket) => {
+    console.log('User connected to socket');
 
+    socket.on('join', (userId) => {
+        socket.join(`user_${userId}`);
+        console.log(`User ${userId} joined their notification room`);
+    });
+
+    socket.on('markAsRead', async (data) => {
+        const { notificationId, userId } = data;
+        await NotificationService.markAsRead(notificationId, userId);
+        socket.emit('notificationRead', notificationId);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('User disconnected');
+    });
+});
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
@@ -30,6 +52,7 @@ app.use('/api/issues', require('./routes/issues'));
 app.use('/api/upload', require('./routes/upload'));
 
 app.use('/api/feedback', require('./routes/feedback'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 
 // Health Check
