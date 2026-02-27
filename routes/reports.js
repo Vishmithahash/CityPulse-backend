@@ -10,8 +10,10 @@ const {
     runReport,
     getAdminDashboard,
     getOfficerDashboard,
-    getCitizenDashboard
+    getCitizenDashboard,
+    downloadReportPdf
 } = require('../controllers/reportController');
+
 const protect = require('../middleware/auth');
 const authorize = require('../middleware/roles');
 
@@ -22,6 +24,8 @@ router.get('/dashboard/citizen/:id', protect, authorize('admin', 'citizen'), get
 
 // Execution routes (Admin and Officer for reading analytics)
 router.get('/:id/run', protect, authorize('admin', 'officer'), runReport);
+router.get('/:id/download', protect, authorize('admin', 'officer'), downloadReportPdf);
+
 
 // CRUD routes (Admin only)
 router.route('/')
