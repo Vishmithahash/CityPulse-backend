@@ -10,7 +10,8 @@ const User = require('../models/User');
 // @access  Private/Admin
 const createAssignment = async (req, res) => {
     try {
-        const { assignedTo, priority, deadline, notes, estimatedTime } = req.body;
+        const { assignedTo, officerId, priority, deadline, notes, estimatedTime } = req.body;
+        const targetOfficerId = assignedTo || officerId;
         const { issueId } = req.params;
 
         // 1. Check if issue exists and is not already resolved/closed
@@ -36,7 +37,7 @@ const createAssignment = async (req, res) => {
         // 3. Create assignment
         const assignment = new Assignment({
             issue: issueId,
-            assignedTo,
+            assignedTo: targetOfficerId,
             assignedBy: req.user._id,
             priority,
             deadline,
@@ -45,7 +46,7 @@ const createAssignment = async (req, res) => {
             history: [{
                 action: 'assigned',
                 admin: req.user._id,
-                officer: assignedTo,
+                officer: targetOfficerId,
                 notes: notes || 'Initial assignment'
             }]
         });
@@ -54,27 +55,46 @@ const createAssignment = async (req, res) => {
 
         // 4. Update Issue status
         issue.status = 'assigned';
-        issue.assignedTo = assignedTo;
+        issue.assignedTo = targetOfficerId;
         await issue.save();
 
-        // 5. Google Calendar Integration - On Assignment Creation
-        try {
-            const officer = await User.findById(assignedTo);
-            if (officer) {
-                console.log('🔄 Creating Google Calendar event for assignment...');
-                const calendarResult = await CalendarService.createAssignmentEvent(officer, assignment, issue);
-                if (calendarResult) {
-                    console.log('✅ Calendar event created successfully');
-                } else {
-                    console.log('⚠️  Calendar event creation failed (check logs above)');
-                }
+        // 5. Google Calendar Integration
+        const officer = await User.findById(targetOfficerId);
+        if (officer) {
+            try {
+                console.log('🔄 Creating Google Calendar event...');
+                await CalendarService.createAssignmentEvent(officer, assignment, issue);
+            } catch (calError) {
+                console.error('⚠️ Google Calendar Error:', calError.message);
             }
-        } catch (calError) {
-            console.error('❌ Google Calendar Error (Creation):', calError.message);
+
+            // 6. 🚨 SEND NOTIFICATION EMAILS
+            try {
+                const EmailService = require('../services/emailService');
+                console.log('📨 Sending notification emails...');
+
+                // Populate reportedBy with specific fields to be sure
+                console.log('🔄 Populating reportedBy for issue...');
+                await issue.populate({ path: 'reportedBy', select: 'name email phone' });
+
+                if (!issue.reportedBy || !issue.reportedBy.email) {
+                    console.log('⚠️ Could not populate reporter email. Current reportedBy:', issue.reportedBy);
+                }
+
+                // Email 1: Notify Citizen
+                await EmailService.sendToCitizen(issue, officer);
+
+                // Email 2: Notify Officer  
+                await EmailService.sendToOfficer(issue, officer, issue.reportedBy);
+            } catch (emailError) {
+                console.error('❌ Email Notification Error:', emailError.message);
+                console.error(emailError.stack);
+            }
         }
 
         res.status(201).json(assignment);
     } catch (error) {
+        console.error('Assignment Creation Error:', error);
         res.status(400).json({ message: error.message });
     }
 };
@@ -174,7 +194,13 @@ const acceptAssignment = async (req, res) => {
         await assignment.save();
 
         // Update issue status to in-progress
-        await Issue.findByIdAndUpdate(assignment.issue, { status: 'in-progress' });
+        const issue = await Issue.findByIdAndUpdate(assignment.issue, { status: 'in-progress' }, { new: true }).populate('reportedBy');
+
+        // 🚨 NEW: SEND NOTIFICATION EMAIL TO CITIZEN
+        const EmailService = require('../services/emailService');
+        if (issue && issue.reportedBy) {
+            await EmailService.sendStatusUpdateToCitizen(issue, 'in-progress');
+        }
 
         // Notify Admin
         const admins = await User.find({ role: 'admin' });
@@ -302,7 +328,13 @@ const completeAssignment = async (req, res) => {
         await assignment.save();
 
         // Update Issue status to resolved
-        await Issue.findByIdAndUpdate(assignment.issue, { status: 'resolved' });
+        const issue = await Issue.findByIdAndUpdate(assignment.issue, { status: 'resolved' }, { new: true }).populate('reportedBy');
+
+        // 🚨 NEW: SEND NOTIFICATION EMAIL TO CITIZEN
+        const EmailService = require('../services/emailService');
+        if (issue && issue.reportedBy) {
+            await EmailService.sendStatusUpdateToCitizen(issue, 'resolved');
+        }
 
         res.json(assignment);
     } catch (error) {
