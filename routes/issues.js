@@ -6,12 +6,17 @@ const {
     getIssueById,
     updateIssue,
     deleteIssue,
-    getIssuesNearby
+    getIssuesNearby,
+    getAISuggestions
 } = require('../controllers/issueController');
 const protect = require('../middleware/auth');
 const authorize = require('../middleware/roles');
+const { aiLimiter } = require('../middleware/rateLimit');
 
 const upload = require('../middleware/multer');
+
+// @route   POST /api/issues/ai-suggest
+router.post('/ai-suggest', protect, aiLimiter, getAISuggestions);
 
 // @route   GET /api/issues/nearby
 // Order matters: place specific routes before parameterized routes
